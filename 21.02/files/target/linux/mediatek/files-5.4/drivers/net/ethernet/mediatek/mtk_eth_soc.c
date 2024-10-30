@@ -1301,7 +1301,8 @@ static void mtk_mac_link_up(struct phylink_config *config, unsigned int mode,
 	mtk_pse_set_mac_port_link(mac, true, interface);
 }
 
-void mtk_mac_fe_reset_complete(struct mtk_eth *eth, unsigned long restart)
+void mtk_mac_fe_reset_complete(struct mtk_eth *eth, unsigned long restart,
+			       unsigned long restart_carrier)
 {
 	struct phylink_link_state state;
 	struct mtk_mac *mac;
@@ -1329,7 +1330,8 @@ void mtk_mac_fe_reset_complete(struct mtk_eth *eth, unsigned long restart)
 				mac->interface, mac->speed, mac->duplex,
 				mac->tx_pause, mac->rx_pause);
 
-		netif_carrier_on(eth->netdev[i]);
+		if (test_bit(i, &restart_carrier))
+			netif_carrier_on(eth->netdev[i]);
 	}
 }
 
@@ -5023,7 +5025,7 @@ int mtk_phy_config(struct mtk_eth *eth, int enable)
 	return 0;
 }
 
-static void mtk_prepare_reset_fe(struct mtk_eth *eth)
+static void mtk_prepare_reset_fe(struct mtk_eth *eth, unsigned long *restart_carrier)
 {
 	struct mtk_mac *mac;
 	u32 i = 0, val = 0;
@@ -5037,6 +5039,9 @@ static void mtk_prepare_reset_fe(struct mtk_eth *eth)
 	for (i = 0; i < MTK_MAC_COUNT; i++) {
 		if (!eth->netdev[i])
 			continue;
+
+		if (netif_carrier_ok(eth->netdev[i]))
+			__set_bit(i, restart_carrier);
 
 		/* call carrier off first to avoid false dev_watchdog timeouts */
 		netif_carrier_off(eth->netdev[i]);
@@ -5078,7 +5083,7 @@ static void mtk_prepare_reset_fe(struct mtk_eth *eth)
 static void mtk_pending_work(struct work_struct *work)
 {
 	struct mtk_eth *eth = container_of(work, struct mtk_eth, pending_work);
-	unsigned long restart = 0;
+	unsigned long restart = 0, restart_carrier = 0;
 	u32 val;
 	int i;
 
@@ -5112,7 +5117,7 @@ static void mtk_pending_work(struct work_struct *work)
 		mtk_prepare_reset_ppe(eth, 2);
 
 	/* Adjust FE configurations to prepare for reset */
-	mtk_prepare_reset_fe(eth);
+	mtk_prepare_reset_fe(eth, &restart_carrier);
 
 	/* Trigger Wifi SER reset */
 	for (i = 0; i < MTK_MAC_COUNT; i++) {
@@ -5210,7 +5215,7 @@ static void mtk_pending_work(struct work_struct *work)
 		break;
 	}
 
-	mtk_mac_fe_reset_complete(eth, restart);
+	mtk_mac_fe_reset_complete(eth, restart, restart_carrier);
 
 	/* Restore QDMA configurations */
 	if (MTK_HAS_CAPS(eth->soc->caps, MTK_QDMA))
