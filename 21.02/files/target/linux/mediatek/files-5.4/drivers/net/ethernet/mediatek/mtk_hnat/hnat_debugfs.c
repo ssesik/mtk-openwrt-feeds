@@ -1145,6 +1145,7 @@ static int hnat_nf_acct_update(struct mtk_hnat *h, u32 ppe_id,
 				atomic64_add(bytes, &counter[dir].bytes);
 				atomic64_add(packets, &counter[dir].packets);
 			}
+			nf_ct_put(ct);
 		}
 	}
 
